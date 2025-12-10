@@ -1,0 +1,166 @@
+name: asistente_diario
+services:
+  mongo:
+    image: mongo:7
+    container_name: mongo
+    ports:
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_DATABASE: asistente_diario
+      TZ: Europe/Madrid
+    healthcheck:
+      test:  ["CMD-SHELL", "echo 'db.runCommand({ ping: 1 }).ok' | mongosh --quiet mongodb://localhost:27017/admin | grep -q 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - mongo_data:/data/db
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"                        
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"   
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "7777:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    restart: unless-stopped
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
+    restart: unless-stopped
+
+  notas:
+    build:
+      context: ./notas
+      dockerfile: Dockerfile
+    image: notas:0.0.1
+    container_name: notas
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/asistente_diario
+      SPRING_APPLICATION_NAME: notas
+      JWT_SECRET: ${JWT_SECRET:-tu_clave_super_secreta_de_minimo_32_caracteres}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+      TZ: Europe/Madrid
+    depends_on: [ mongo, kafka ]
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  tareas:
+    build:
+      context: ./tareas
+      dockerfile: Dockerfile
+    image: tareas:0.0.1
+    container_name: tareas
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/asistente_diario
+      SPRING_APPLICATION_NAME: tareas
+      JWT_SECRET: ${JWT_SECRET:-tu_clave_super_secreta_de_minimo_32_caracteres}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+      TZ: Europe/Madrid
+    depends_on:   [ mongo, kafka ]
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  servicio_usuario:
+    build:
+      context: ./servicio_usuario
+      dockerfile: Dockerfile
+    image: servicio_usuario:0.0.1
+    container_name: servicio_usuario
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/asistente_diario
+      SPRING_APPLICATION_NAME: servicio_usuario
+      JWT_SECRET: ${JWT_SECRET:-tu_clave_super_secreta_de_minimo_32_caracteres}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+      TZ: Europe/Madrid
+    depends_on: [ mongo ]
+    ports:
+      - "8086:8086"
+    restart: unless-stopped
+
+  alarmas:
+    build:
+      context: ./alarmas
+      dockerfile: Dockerfile
+    image: alarmas:0.0.1
+    container_name: alarmas
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      TZ: Europe/Madrid
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/asistente_diario
+      SPRING_APPLICATION_NAME: alarmas
+      JWT_SECRET: ${JWT_SECRET:-tu_clave_super_secreta_de_minimo_32_caracteres}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+
+  notificador:
+    build:
+      context: ./notificador
+      dockerfile: Dockerfile
+    image: notificador:0.0.1
+    container_name: notificador
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/asistente_diario
+      SPRING_APPLICATION_NAME: notificador
+      TZ: Europe/Madrid
+    depends_on:
+      kafka:
+        condition: service_started
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    restart: unless-stopped
+
+volumes:
+  mongo_data: {}
+  kafka_data: {}
