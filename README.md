@@ -1,2 +1,2 @@
-# daily-assistant-backend
- Personal backend learning project: a daily assistant application using Java, Spring Boot, MongoDB, and Kafka in a microservices environment.
+# daily-assistant-compose
+ Orchestration repository with Docker Compose to run the full microservices stack and infrastucture
